@@ -2,7 +2,7 @@
 
 ## 1. Status, Goal, and Confirmed Decisions
 
-This document describes the full target design. Phase 1 implements configuration, database models and migrations, health checks, and the worker process scaffold; notification submission and delivery remain planned. It follows the original assignment discussed with the user. See [PLAN.md](PLAN.md) for progress.
+This document describes the full target design. Phases 1 and 2 implement configuration, database models and migrations, health checks, the worker process scaffold, durable submission, and status queries. Delivery, retries, recovery, and replay remain planned. It follows the original assignment discussed with the user. See [PLAN.md](PLAN.md) for progress.
 
 The goal is to accept HTTP notifications prepared by internal business systems, persist them, deliver them asynchronously, retry failures, and retain results for queries and manual intervention.
 
@@ -51,7 +51,7 @@ Docker Compose provides PostgreSQL, a one-time migration service, the API, and t
 
 `POST /notifications` accepts a JSON object:
 
-| Field | Proposed contract |
+| Field | Implemented contract |
 | --- | --- |
 | `url` | Required complete HTTP(S) URL; query parameters are allowed |
 | `method` | Defaults to POST; supports GET, POST, PUT, PATCH, and DELETE |
@@ -59,17 +59,23 @@ Docker Compose provides PostgreSQL, a one-time migration service, the API, and t
 | `json_body` | Optional JSON value; mutually exclusive with text_body |
 | `text_body` | Optional UTF-8 text; mutually exclusive with json_body |
 
-Requests may omit the body. Field presence distinguishes an absent JSON body from JSON `null`. JSON is serialized as UTF-8 with a JSON Content-Type. For text, callers specify Content-Type or it defaults to UTF-8 text/plain. Retries send the same persisted body content. Files, multipart forms, and raw binary data are outside the first version.
+Unknown fields, unsupported methods, non-string headers, malformed or incomplete URLs, non-finite JSON numbers, and invalid UTF-8 are rejected. Methods use uppercase names. Header names must be HTTP tokens, and values must contain printable ASCII only; case-insensitive duplicate names are rejected. These restrictions catch requests that cannot be forwarded safely before acceptance.
+
+Requests may omit the body. Field presence distinguishes an absent JSON body from JSON `null`. JSON is serialized as compact UTF-8 with sorted object keys and `Content-Type: application/json`, overriding any supplied Content-Type. Explicit `text_body: null` is invalid. For text, callers specify Content-Type or it defaults to UTF-8 text/plain. Retries send the same persisted body content. Files, multipart forms, and raw binary data are outside the first version.
 
 The HTTP client manages Host, Content-Length, and hop-by-hop headers; callers may not set these fields, preventing inconsistent requests. Other business headers are preserved. The submission idempotency key is not automatically injected into provider requests. Redirects are not followed automatically, and TLS certificate verification remains enabled.
 
 After transaction commit, return `202` with `id`, the current `status`, and `status_url`, plus a Location header pointing to the query endpoint. Validation errors return `422`; temporary database unavailability returns `503`. Callers may retry with the same idempotency key when submission outcomes are uncertain.
 
-The optional inbound `Idempotency-Key` header uses a global key namespace; callers should prefix keys with their business system name. A database uniqueness constraint ensures that concurrent submissions with the same key create only one task. The same key and content return the original task with `202`, without triggering another delivery. The same key with different content returns `409`. Without a key, each submission creates a new task.
+The optional inbound `Idempotency-Key` header accepts one value of 1–200 visible ASCII characters without spaces; empty or repeated headers are rejected with `422`. It uses a global key namespace; callers should prefix keys with their business system name. A database uniqueness constraint ensures that concurrent submissions with the same key create only one task. The same key and content return the original task with `202`, without triggering another delivery. The same key with different content returns `409`. Without a key, each submission creates a new task.
 
-Content comparison uses the validated request: URL, method, headers normalized case-insensitively and sorted, and body type and content. JSON object key order does not affect comparison; text is compared as supplied. Reject duplicate header names after case folding. Apply only the defined normalization; do not infer business equivalence between different URLs. Keys remain valid for as long as their tasks are retained.
+Content comparison uses the validated request: URL, method, headers normalized case-insensitively and sorted, and body type and content. JSON object key order does not affect comparison; text is compared as supplied. Reject duplicate header names after case folding. Apply only the defined normalization; do not infer business equivalence between different URLs. Keys remain valid for as long as their tasks are retained. Comparison includes the caller-supplied headers before default Content-Type insertion, so omitted and explicitly supplied headers remain distinct. URLs are validated without rewriting the stored or compared string. JSON numeric spelling is normalized by JSON parsing and serialization; integers and floating-point values may remain distinct.
 
-`GET /notifications/{id}` returns the task ID, status, current round, attempts in the current round, creation and update times, next attempt time, and the latest attempt summary. The summary includes an HTTP status code or sanitized error category, without request headers, request bodies, or provider response bodies. Missing tasks return `404`.
+The implementation hashes this canonical content with SHA-256. PostgreSQL `INSERT ... ON CONFLICT DO NOTHING` targets the existing named unique constraint. Under the default READ COMMITTED isolation, a conflicting insert waits for the other transaction, then a separate SELECT sees the committed original task and compares its digest. A duplicate never changes task state. Initial tasks have `pending` status, round 1, zero attempts, and a database-generated due time. No schema change is needed for phase 2.
+
+The transaction context must exit successfully before the route emits `202`. Database errors, including commit failures, produce a generic `503`; uncertain commit outcomes can be retried with the same key. Validation responses also use a generic message rather than echoing invalid input or credentials.
+
+`GET /notifications/{id}` returns the task ID, status, current round, attempts in the current round, creation and update times, next attempt time, and the latest attempt summary. The summary includes an HTTP status code or sanitized error category, without request headers, request bodies, or provider response bodies. Missing tasks return `404`. The implemented response fields are `id`, `status`, `round`, `attempt_count`, `created_at`, `updated_at`, `next_attempt_at`, and `latest_attempt`. The latter is initially null, otherwise an object with `status_code` and `error_category`. Queries select only public status columns and never return destination URLs or submission keys. Error categories are allowlisted (`network_error`, `timeout`, `http_error`, `unknown_outcome`); other stored strings become `unknown_error`.
 
 ### Replay and Health Checks
 

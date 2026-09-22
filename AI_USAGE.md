@@ -2,7 +2,7 @@
 
 ## Scope of This Record
 
-This document records actual AI collaboration on the project and will evolve during development. Work completed so far includes requirements discussions, design, project documentation, and the phase 1 implementation. The foundation and its tests are implemented; notification submission and delivery remain planned. Reasons offered by the AI are not automatically attributed to the author as personal motivations.
+This document records actual AI collaboration on the project and will evolve during development. Work completed so far includes requirements discussions, design, project documentation, and the phase 1 and 2 implementations. The foundation, durable submission, status queries, and their tests are implemented; delivery remains planned. Reasons offered by the AI are not automatically attributed to the author as personal motivations.
 
 ## AI Contributions
 
@@ -58,3 +58,13 @@ The implementation uses Python 3.14 to match the available host interpreter and 
 Verification completed: locked dependency installation, Ruff checks, eight passing tests, model/migration consistency, migration downgrade and re-upgrade, Compose migration-before-application startup, both live HTTP health endpoints, and container recreation with the database volume retained. The first sandboxed checks could not access the local database; the full test suite passed after local connectivity was authorized. Two upstream TestClient deprecation warnings were observed and are not suppressed.
 
 The worker currently checks database readiness only and explicitly logs that task delivery is not implemented. No claim is made that notification reliability, retries, or replay have been implemented or tested. No Git commit, push, or deployment was performed. Author review of the implementation is still pending.
+
+## Phase 2 Implementation Record
+
+At the user's request, the AI implemented durable submission and status queries. Changes include strict request validation, canonical UTF-8 body serialization and SHA-256 comparison, optional submission keys, PostgreSQL conflict handling for concurrent requests, commit-before-acceptance behavior, and public status projections. The existing migration already provides all required columns and the idempotency uniqueness constraint, so no schema migration or dependency change was needed. The existing isolated-schema fixture was shared with new integration tests.
+
+The AI selected explicit validation defaults for keys (one header, 1–200 visible ASCII characters), header syntax, finite JSON numbers, valid UTF-8, and complete URLs. It also made validation and database error responses generic to avoid echoing credentials, and allowlisted status error categories. These implementation choices and canonicalization details are recorded in DESIGN.md; they are not attributed to individual user decisions.
+
+Verification: 38 tests passed against real PostgreSQL, including two eight-request concurrency scenarios, independently observed persistence after acceptance, commit-stage failure injection and rollback, validation/redaction, safe status queries, and existing migration checks. Ruff lint and formatting checks passed. The initial sandboxed test process stalled and was interrupted; the complete suite succeeded with local database access authorized. The same two upstream TestClient deprecation warnings remain. Delivery, retries, recovery, and replay were not implemented or tested in this phase. No Git commit or push was performed.
+
+Live HTTP verification also passed against a temporary Uvicorn process on port 8001 connected to the local Compose PostgreSQL database: readiness 200, submission 202, repeated submission with the same ID, conflicting submission 409, invalid submission 422, and status query 200. The `demo:phase2` task remains as demonstration data. The temporary API was stopped afterward. A fresh Compose build was interrupted because dependency downloads stalled; the updated container startup was not verified. Existing Compose containers were retained.

@@ -6,7 +6,7 @@ The project follows an API notification system assignment, emphasizing system bo
 
 ## Current Status
 
-Phase 1 provides the project foundation: configuration, database models and migrations, API health checks, a separate worker scaffold, and Docker Compose. Submission, delivery, retries, and replay are not implemented yet. The worker reports database readiness but does not claim or deliver tasks.
+Phases 1 and 2 provide configuration, database models and migrations, API health checks, a separate worker scaffold, Docker Compose, durable submission, and status queries with concurrent idempotency protection. Delivery, retries, and replay are not implemented yet. The worker reports database readiness but does not claim or deliver tasks.
 
 The stack is Python 3.14, FastAPI, uv, PostgreSQL 17, SQLAlchemy, psycopg, Alembic, and HTTPX. Runtime and development dependencies are locked in `uv.lock`.
 
@@ -77,7 +77,28 @@ TEST_DATABASE_URL=postgresql+psycopg://notifications:notifications@localhost:554
 
 Adjust credentials and port if you changed the defaults. If the test database already exists, skip `createdb`. Each database test creates and removes its own randomly named schema. The test user needs schema creation privileges; do not point tests at a production database. Without `TEST_DATABASE_URL`, PostgreSQL integration tests are explicitly skipped.
 
-Tests cover configuration validation, liveness during database failure, missing-schema readiness, migration upgrade/downgrade/re-upgrade, model/migration consistency, scheduling indexes, binary body persistence, and database uniqueness and foreign-key constraints.
+Tests cover configuration validation, liveness during database failure, missing-schema readiness, migration upgrade/downgrade/re-upgrade, model/migration consistency, scheduling indexes, binary body persistence, and database uniqueness and foreign-key constraints. Submission tests additionally cover validation and redaction, canonical request comparison, persisted body bytes, status queries, eight concurrent matching or conflicting submissions, and rollback on an injected commit failure. All database behavior tests use real PostgreSQL; no real provider is contacted.
+
+## Submit and Query Notifications
+
+With Compose running, submit a task (this demonstration key can be reused):
+
+```bash
+curl --fail-with-body -i http://localhost:8000/notifications \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: demo:phase2' \
+  -d '{"url":"https://example.test/events","json_body":{"event":"registered"}}'
+```
+
+The response is `202` with `id`, `status`, and `status_url`. Copy the returned `status_url` into the query command:
+
+```bash
+curl --fail http://localhost:8000/notifications/REPLACE_WITH_RETURNED_ID
+```
+
+Repeat the submission unchanged to receive the same task ID. Changing content with the same key returns `409`; omit the key to create a new task each time. Invalid input returns `422`, and database errors return `503`. Acceptance occurs only after commit. Queries return status, counters, timestamps, and a sanitized latest attempt summary, without request data. Tasks remain `pending` because delivery belongs to phase 3.
+
+Supported methods are GET, POST (default), PUT, PATCH, and DELETE. Supply at most one of `json_body` or `text_body`; JSON null is a body, while omission means no body. JSON uses `application/json`; text defaults to `text/plain; charset=utf-8`. See [DESIGN.md](DESIGN.md) for header restrictions and exact idempotency comparison rules.
 
 ## Intended Notification Workflow
 
@@ -91,7 +112,7 @@ Business system submits request -> PostgreSQL persists task -> Task ID returned
                                                      Manual replay
 ```
 
-Callers prepare the URL, headers, and body. The planned service acknowledges acceptance only after persistence, without waiting for the provider response. Duplicate delivery is possible and automatic retries are bounded. HTTP success does not prove provider business success; business deduplication requires cooperation between the caller and provider.
+Callers prepare the URL, headers, and body. The service acknowledges acceptance only after persistence, without waiting for the provider response. Duplicate delivery is possible and automatic retries are bounded. HTTP success does not prove provider business success; business deduplication requires cooperation between the caller and provider.
 
 The first version is for a trusted internal demonstration. Authentication, destination allowlists, provider adapters, and an administration UI are out of scope. A mock provider and full notification demonstrations will be added in later phases.
 

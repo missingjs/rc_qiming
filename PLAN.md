@@ -2,7 +2,7 @@
 
 ## Current Status and Scope
 
-Phase 1 is complete: the uv project, configuration, database schema and migrations, API health checks, worker scaffold, and Compose setup are implemented and verified. Notification submission and delivery are not implemented yet. See [DESIGN.md](DESIGN.md) for behavior contracts and proposed defaults. This plan covers the minimum reliable delivery workflow, excluding production deployment and provider-specific business adapters.
+Phases 1 and 2 are complete: the foundation, durable notification submission, idempotency, and status queries are implemented and verified. Delivery is not implemented yet. See [DESIGN.md](DESIGN.md) for behavior contracts and proposed defaults. This plan covers the minimum reliable delivery workflow, excluding production deployment and provider-specific business adapters.
 
 - [x] Review the original requirements and confirm the technology stack and MVP boundaries.
 - [x] Create the README, collaboration guidelines, implementation plan, design, and AI usage statement.
@@ -20,11 +20,13 @@ Verification: locked dependency installation, Ruff lint and formatting checks, a
 
 ## Phase 2: Durable Submission and Status Queries
 
-- [ ] Implement request validation, submission, and status queries.
-- [ ] Implement optional idempotency keys, request comparison, and database uniqueness constraints, including concurrent submissions.
-- [ ] Acknowledge acceptance only after transaction commit; return an explicit failure when the database is unavailable.
+- [x] Implement request validation, submission, and status queries.
+- [x] Implement optional idempotency keys, request comparison, and database uniqueness constraints, including concurrent submissions.
+- [x] Acknowledge acceptance only after transaction commit; return an explicit failure when the database is unavailable.
 
 Acceptance: valid requests return a task ID after persistence; invalid requests are rejected. The same key and request return the original task; the same key with different content causes a conflict. Concurrent duplicate submissions create only one task. Queries do not expose sensitive request data.
+
+Verification: Ruff lint and formatting checks passed. All 38 tests passed, including real PostgreSQL persistence and query tests, eight concurrent matching submissions returning one task, eight conflicting submissions with exactly one acceptance, and rollback after an injected commit-stage failure. Validation and database failures return redacted responses. Existing migration and constraint tests still pass. Two upstream TestClient deprecation warnings remain. A temporary local Uvicorn API against the Compose PostgreSQL database also passed HTTP checks for readiness, submission, duplicate IDs, conflicts, validation, and queries. A fresh Compose image build was interrupted after dependency downloads stalled; startup with the new image was not verified.
 
 ## Phase 3: Delivery and Retries
 
@@ -54,4 +56,4 @@ Acceptance: following the README reproduces successful delivery, recovery from t
 
 ## Execution and Maintenance
 
-Complete phases in order; each depends on the preceding phase. If implementation reveals a design issue, update the relevant DESIGN contract and rationale, then align acceptance criteria. Phase 1 has passed acceptance; phases 2 through 5 remain unstarted. The phase 1 worker is a readiness-checking process scaffold and does not implement delivery or the recovery behavior planned for later phases.
+Complete phases in order; each depends on the preceding phase. If implementation reveals a design issue, update the relevant DESIGN contract and rationale, then align acceptance criteria. Phases 1 and 2 have passed acceptance; phases 3 through 5 remain unstarted. The phase 1 worker is a readiness-checking process scaffold and does not implement delivery or the recovery behavior planned for later phases.
