@@ -20,9 +20,13 @@ Specific libraries, API fields, and runtime parameters below are implemented def
 
 The service handles durable submission, asynchronous HTTP delivery, bounded retries, status queries, crash recovery, and manual replay. It does not handle business field mapping, provider SDKs, dynamic signing, credential refresh, file uploads, strict ordering, or provider business deduplication.
 
+The author's rationale is that callers know the provider request details and must adapt as providers change or new integrations are added. Callers express those details through the service's standard submission contract, keeping provider-specific changes on their side. Within the supported HTTP contract, adding a provider requires no change to this service. This supports the open/closed goal of extending integrations without modifying the delivery core; the concrete boundary is that the core processes request data without depending on provider-specific implementations. Callers consequently retain responsibility for maintaining those integrations.
+
 The design follows an at-least-once delivery approach and permits duplicates. Permanent errors and retry limits mean it does not guarantee eventual successful delivery for every task. `202` means only that the task was committed to the database. `succeeded` means only that an HTTP `2xx` response was received, not that the provider completed its business operation.
 
 Duplicate delivery can occur when the provider processes a request but its response is lost, or when a worker receives success but cannot persist the result. The service cannot independently guarantee exactly-once execution. Callers should include business idempotency identifiers in headers or bodies according to the provider's protocol. Submission idempotency and provider business idempotency are separate concerns.
+
+The author's rationale for submission idempotency is that network instability can cause callers to submit the same request again. Only the caller knows whether a submission represents a new request or a retry, so callers needing deduplication must supply a stable idempotency key and reuse it for retries. This service is responsible for creating only one task per key: matching submissions return the existing task, and conflicting content is rejected. The author confirmed that this responsibility concerns task creation, while preventing duplicate business effects from worker delivery retries still requires provider support. The key remains optional for callers that do not need submission deduplication.
 
 Callers own consistency between committing their business transactions and submitting notifications; a transactional outbox in the business system may be appropriate. This service does not guarantee recovery from database storage corruption. Production backups, high availability, and operations are outside the MVP.
 
@@ -143,6 +147,8 @@ For 429/503, parse valid Retry-After values as seconds or HTTP dates and use the
 Attempt records store `succeeded`, `retryable_failure`, `permanent_failure`, or `unknown_outcome`, plus status code, sanitized error category, and start/end timestamps. A retryable final attempt retains its retryable outcome even though its task becomes failed. Retry scheduling uses the database result timestamp. Raw Retry-After values are used transiently and are not persisted.
 
 Exhausted attempts and non-retryable errors transition to `failed` with diagnostic records retained. Prolonged outages do not trigger unlimited automatic delivery. An operator may replay after the provider recovers or the issue is investigated. The MVP has no administration UI, automatic alerts, or endpoint for editing failed request content. Changed requests require a new task and a new idempotency key.
+
+The author chooses a maximum attempt count because tasks must not retry indefinitely. They expect failures that exhaust all attempts to be uncommon, so human intervention offers acceptable cost and flexibility without adding more automated recovery mechanisms. This is an MVP operating assumption, not an observed failure rate. The tradeoff is that exhausted tasks wait for an operator; if their frequency or intervention cost grows, this assumption and the recovery tooling should be revisited.
 
 ## 8. Verification, Tradeoffs, and Evolution
 

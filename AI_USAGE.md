@@ -28,9 +28,10 @@ This document records actual AI collaboration on the project and will evolve dur
 | Python, FastAPI, and uv | Explicitly specified by the user; personal reasons have not yet been provided |
 | Use the existing GitHub repository | The user had already created it and explicitly ruled out recreating it |
 | PostgreSQL and a separate worker | Selected by the user; the AI's rationale was to demonstrate persistence, concurrency, and crash recovery |
-| Caller prepares provider requests | Selected by the user; the AI recommended focusing the service on reliable delivery without provider business coupling |
+| Caller prepares provider requests | The user reasons that callers know provider details and can adapt when those details change or new providers are added. A standard submission contract isolates those changes on the caller side and lets this service focus on request processing. The user relates this separation to the open/closed and dependency inversion principles. |
+| Bounded retries and manual replay | The user requires a maximum attempt count and human intervention after exhaustion. They expect exhausted failures to be uncommon, making manual handling an acceptable and flexible cost while avoiding additional automated recovery complexity. This frequency is an expectation, not a measured result. |
 | Trusted internal demonstration | The user chose to omit authentication and destination allowlists for the first version, with the boundary documented |
-| Optional submission idempotency key | The user chose to handle duplicate submissions; this does not guarantee once-only execution at the provider |
+| Optional submission idempotency key | The user expects network instability to cause callers to retry submissions. Callers know which requests are new and which are retries, so they must provide a stable key when they need deduplication. The user clarified that this service's responsibility is to create only one task for repeated submissions with the same key, not to guarantee once-only business execution at the provider. |
 | Short retry window | The user selected a demonstration lasting a few minutes rather than the AI's recommended roughly one-day window |
 | Five-document structure | The user agreed to the AGENTS, PLAN, and DESIGN split and requested README and AI_USAGE as well |
 | Focused collaboration guidelines | The user identified design details in AGENTS and approved removing them in favor of references to DESIGN |
