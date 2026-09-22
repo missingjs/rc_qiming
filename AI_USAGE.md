@@ -2,7 +2,7 @@
 
 ## Scope of This Record
 
-This document records actual AI collaboration on the project and will evolve during development. Work completed so far includes requirements discussions, design, and five project documents. No application code has been implemented and no application tests have been run. Reasons offered by the AI are not automatically attributed to the author as personal motivations.
+This document records actual AI collaboration on the project and will evolve during development. Work completed so far includes requirements discussions, design, project documentation, and the phase 1 implementation. The foundation and its tests are implemented; notification submission and delivery remain planned. Reasons offered by the AI are not automatically attributed to the author as personal motivations.
 
 ## AI Contributions
 
@@ -48,3 +48,13 @@ A separate message broker, Celery, and a full administration UI were considered 
 - Record tests, defects, and design adjustments based on observed results; do not present planned verification as completed.
 
 See [DESIGN.md](DESIGN.md) for design contracts and [PLAN.md](PLAN.md) for implementation progress.
+
+## Phase 1 Implementation Record
+
+At the user's request, the AI implemented the first milestone and updated its acceptance checklist. Work includes the uv project and lockfile, shared environment settings, SQLAlchemy models, a versioned Alembic migration, FastAPI liveness and readiness endpoints, a worker process scaffold, Docker Compose, example environment configuration, and foundation tests.
+
+The implementation uses Python 3.14 to match the available host interpreter and container runtime, and PostgreSQL 17 for the demonstration database. These are implementation defaults chosen by the AI, not versions explicitly requested by the user. Readiness verifies expected table columns rather than connectivity alone. Tests use isolated schemas in a dedicated PostgreSQL database and do not substitute SQLite.
+
+Verification completed: locked dependency installation, Ruff checks, eight passing tests, model/migration consistency, migration downgrade and re-upgrade, Compose migration-before-application startup, both live HTTP health endpoints, and container recreation with the database volume retained. The first sandboxed checks could not access the local database; the full test suite passed after local connectivity was authorized. Two upstream TestClient deprecation warnings were observed and are not suppressed.
+
+The worker currently checks database readiness only and explicitly logs that task delivery is not implemented. No claim is made that notification reliability, retries, or replay have been implemented or tested. No Git commit, push, or deployment was performed. Author review of the implementation is still pending.

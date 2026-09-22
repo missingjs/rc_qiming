@@ -1,0 +1,59 @@
+x-application: &application
+  build: .
+  image: rc-qiming:local
+  environment: &environment
+    DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-notifications}:${POSTGRES_PASSWORD:-notifications}@postgres:5432/${POSTGRES_DB:-notifications}
+    WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-1}
+    DELIVERY_TIMEOUT_SECONDS: ${DELIVERY_TIMEOUT_SECONDS:-15}
+    LEASE_SECONDS: ${LEASE_SECONDS:-60}
+    MAX_ATTEMPTS: ${MAX_ATTEMPTS:-5}
+    RETRY_BASE_SECONDS: ${RETRY_BASE_SECONDS:-5}
+    RETRY_MAX_SECONDS: ${RETRY_MAX_SECONDS:-60}
+
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-notifications}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-notifications}
+      POSTGRES_DB: ${POSTGRES_DB:-notifications}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    <<: *application
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *application
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=10)"]
+      interval: 5s
+      timeout: 12s
+      retries: 10
+
+  worker:
+    <<: *application
+    command: ["python", "-m", "notification_service.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 20s
+
+volumes:
+  postgres_data:

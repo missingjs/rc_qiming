@@ -2,7 +2,7 @@
 
 ## 1. Status, Goal, and Confirmed Decisions
 
-This is a design contract written before implementation; the capabilities described here have not been implemented. It follows the original assignment discussed with the user. See [PLAN.md](PLAN.md) for progress.
+This document describes the full target design. Phase 1 implements configuration, database models and migrations, health checks, and the worker process scaffold; notification submission and delivery remain planned. It follows the original assignment discussed with the user. See [PLAN.md](PLAN.md) for progress.
 
 The goal is to accept HTTP notifications prepared by internal business systems, persist them, deliver them asynchronously, retry failures, and retain results for queries and manual intervention.
 
@@ -39,11 +39,11 @@ flowchart LR
     Worker -->|HTTP delivery| Provider[Provider API]
 ```
 
-Proposed libraries are SQLAlchemy 2, psycopg 3, Alembic, HTTPX, Pydantic, pytest, and Ruff. FastAPI and the worker share configuration, models, and persistence logic but run separately. In-process API background tasks do not serve as the queue.
+The foundation uses Python 3.14, PostgreSQL 17, SQLAlchemy 2, psycopg 3, Alembic, HTTPX, Pydantic, pytest, and Ruff. Python 3.14 matches the available development interpreter and the container runtime; PostgreSQL 17 is the selected demonstration database version. FastAPI and the worker share configuration, models, and persistence logic but run separately. In-process API background tasks do not serve as the queue.
 
 The database provides both persistence and the delivery queue, avoiding additional middleware and database-to-broker dual writes. The tradeoffs are polling latency, database load, and the need to implement limited claiming and recovery logic.
 
-Docker Compose provides PostgreSQL, a one-time migration service, the API, and the worker. The database uses a persistent volume, and applications start after migrations succeed. A separate demonstration configuration includes the mock provider. uv manages dependencies and the lockfile is committed. Verified commands will be added to the README after implementation.
+Docker Compose provides PostgreSQL, a one-time migration service, the API, and the worker. The database uses a persistent volume, and applications start after migrations succeed. A separate demonstration configuration includes the mock provider. uv manages dependencies and the lockfile is committed. Foundation startup, migration, and verification commands are documented in the README.
 
 ## 4. API Contract
 
@@ -110,7 +110,7 @@ Each worker processes tasks sequentially by default, claiming one at a time and 
 
 Claiming consumes an attempt, including crashes before the request is sent, preventing repeated crashes from causing unlimited retries. Recovery marks the previous unfinished attempt as having an unknown outcome. Lease tokens prevent stale workers from overwriting newer results but cannot revoke requests already sent to a provider, so duplicates remain possible.
 
-Proposed defaults are a 15-second total delivery timeout and a 60-second lease. In addition to HTTPX phase-specific timeouts, enforce an overall timeout so slow responses cannot extend processing indefinitely. Configuration must require the lease to exceed the total delivery timeout with room to persist the result. Lease renewal is not included in the first version.
+Proposed defaults are a 15-second total delivery timeout and a 60-second lease. In addition to HTTPX phase-specific timeouts, enforce an overall timeout so slow responses cannot extend processing indefinitely. Configuration requires the lease to exceed the total delivery timeout by at least five seconds to leave room to persist the result. Lease renewal is not included in the first version.
 
 On a shutdown signal, stop claiming tasks and allow the current request time to finish and persist its outcome. Forced termination relies on lease recovery. Pause claiming and reconnect after a delay when the database is temporarily unavailable. If a delivery outcome cannot be persisted, leave the lease unfinished for recovery; do not claim durable success based on memory alone.
 
@@ -139,3 +139,5 @@ The design omits a separate message broker, Celery, a provider plugin framework,
 Evolution should begin with adding workers based on measurements, followed by provider-specific concurrency limits, rate limiting, and isolation. Evaluate a message broker only when the database queue becomes a bottleneck, addressing database-to-broker consistency at that point. Before production use, add authentication, destination access controls, credential management, appropriate retry windows, history cleanup, alerts, and database backup policies.
 
 Technical references: PostgreSQL [SELECT locking and SKIP LOCKED](https://www.postgresql.org/docs/current/sql-select.html), HTTPX [timeouts](https://www.python-httpx.org/advanced/timeouts/), and uv [project management](https://docs.astral.sh/uv/guides/projects/).
+
+Foundation implementation references: FastAPI [lifespan events](https://fastapi.tiangolo.com/advanced/events/), uv [Docker integration](https://docs.astral.sh/uv/guides/integration/docker/), and SQLAlchemy [PostgreSQL dialect](https://docs.sqlalchemy.org/en/20/dialects/postgresql.html).
