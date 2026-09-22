@@ -2,7 +2,7 @@
 
 ## 1. Status, Goal, and Confirmed Decisions
 
-This document describes the full target design. Phases 1 and 2 implement configuration, database models and migrations, health checks, the worker process scaffold, durable submission, and status queries. Delivery, retries, recovery, and replay remain planned. It follows the original assignment discussed with the user. See [PLAN.md](PLAN.md) for progress.
+This document describes the full target design. Phases 1 through 3 implement configuration, database models and migrations, health checks, durable submission, status queries, independent delivery, bounded retries, attempt records, and a mock provider. Expired-lease recovery and replay remain planned; phase 4 will complete and validate crash and outage recovery. It follows the original assignment discussed with the user. See [PLAN.md](PLAN.md) for progress.
 
 The goal is to accept HTTP notifications prepared by internal business systems, persist them, deliver them asynchronously, retry failures, and retain results for queries and manual intervention.
 
@@ -75,11 +75,11 @@ The implementation hashes this canonical content with SHA-256. PostgreSQL `INSER
 
 The transaction context must exit successfully before the route emits `202`. Database errors, including commit failures, produce a generic `503`; uncertain commit outcomes can be retried with the same key. Validation responses also use a generic message rather than echoing invalid input or credentials.
 
-`GET /notifications/{id}` returns the task ID, status, current round, attempts in the current round, creation and update times, next attempt time, and the latest attempt summary. The summary includes an HTTP status code or sanitized error category, without request headers, request bodies, or provider response bodies. Missing tasks return `404`. The implemented response fields are `id`, `status`, `round`, `attempt_count`, `created_at`, `updated_at`, `next_attempt_at`, and `latest_attempt`. The latter is initially null, otherwise an object with `status_code` and `error_category`. Queries select only public status columns and never return destination URLs or submission keys. Error categories are allowlisted (`network_error`, `timeout`, `http_error`, `unknown_outcome`); other stored strings become `unknown_error`.
+`GET /notifications/{id}` returns the task ID, status, current round, attempts in the current round, creation and update times, next attempt time, and the latest attempt summary. The summary includes an HTTP status code or sanitized error category, without request headers, request bodies, or provider response bodies. Missing tasks return `404`. The implemented response fields are `id`, `status`, `round`, `attempt_count`, `created_at`, `updated_at`, `next_attempt_at`, and `latest_attempt`. The latter is initially null, otherwise an object with `status_code` and `error_category`. Queries select only public status columns and never return destination URLs or submission keys. Error categories are allowlisted (`network_error`, `timeout`, `http_error`, `invalid_request`, `attempt_limit`, `unknown_outcome`); other stored strings become `unknown_error`.
 
 ### Replay and Health Checks
 
-`POST /notifications/{id}/replay` accepts only `failed` tasks, atomically transitions them to `pending`, and returns `202`. Other states return `409`; missing tasks return `404`. Replay preserves the ID, request, and submission idempotency key, increments the round, resets the round's attempt count, and retains all history. Only one concurrent replay transition may succeed. Successful tasks cannot be replayed.
+The planned `POST /notifications/{id}/replay` endpoint accepts only `failed` tasks, atomically transitions them to `pending`, and returns `202`. Other states return `409`; missing tasks return `404`. Replay preserves the ID, request, and submission idempotency key, increments the round, resets the round's attempt count, and retains all history. Only one concurrent replay transition may succeed. Successful tasks cannot be replayed.
 
 `GET /health/live` checks API process liveness. `GET /health/ready` checks database connectivity and availability of the expected tables, returning `503` when not ready. API readiness does not imply worker health. Worker activity is observed through logs; dedicated heartbeats and monitoring are deferred.
 
@@ -103,9 +103,15 @@ pending / retry_wait -> in_progress -> succeeded
 failed -> pending (manual replay, new round)
 ```
 
-Expired `in_progress` tasks may be claimed again while attempts remain. At the limit, transition to `failed` and record that the previous execution outcome is unknown.
+In the planned recovery implementation, expired `in_progress` tasks may be claimed again while attempts remain. At the limit, transition to `failed` and record that the previous execution outcome is unknown.
 
 ## 6. Claiming, Delivery, and Recovery
+
+Phase 3 implements claiming due `pending` and `retry_wait` tasks, delivery, and atomic result recording. The result transaction checks the task ID, state, lease token, and unexpired lease before changing the task and attempt together. This guard is implemented early because result persistence needs it; reclaiming expired tasks and the full crash/outage acceptance suite remain phase 4 work. A crash or unsaved outcome can therefore leave an `in_progress` task stuck in the current version.
+
+The worker runs an asyncio loop, offloading synchronous database transactions to threads. An HTTPX async client is reused for sequential delivery, with TLS verification enabled, redirects disabled, and environment proxies disabled (`trust_env=False`). Each request is constructed directly from persisted fields rather than merging client cookies. Provider cookies are discarded after each attempt to prevent cross-task state and unbounded cookie retention. Response bodies are neither read nor stored. Invalid client-side requests are permanent failures with the `invalid_request` category.
+
+The following sequence includes the target recovery behavior; phase 3 only claims due tasks:
 
 Each worker processes tasks sequentially by default, claiming one at a time and polling once per second when idle. Multiple worker processes may run concurrently.
 
@@ -116,9 +122,9 @@ Each worker processes tasks sequentially by default, claiming one at a time and 
 
 Claiming consumes an attempt, including crashes before the request is sent, preventing repeated crashes from causing unlimited retries. Recovery marks the previous unfinished attempt as having an unknown outcome. Lease tokens prevent stale workers from overwriting newer results but cannot revoke requests already sent to a provider, so duplicates remain possible.
 
-Proposed defaults are a 15-second total delivery timeout and a 60-second lease. In addition to HTTPX phase-specific timeouts, enforce an overall timeout so slow responses cannot extend processing indefinitely. Configuration requires the lease to exceed the total delivery timeout by at least five seconds to leave room to persist the result. Lease renewal is not included in the first version.
+Implemented defaults are a 15-second total delivery timeout and a 60-second lease. In addition to HTTPX phase-specific timeouts, an `asyncio.timeout` context bounds sending and receiving response headers, including response closure, so slow progress cannot extend processing indefinitely. HTTPX phase timeouts each use the same configured duration. All numeric timing settings must be finite. Configuration requires the lease to exceed the total delivery timeout by at least five seconds to leave room to persist the result. Lease renewal is not included in the first version.
 
-On a shutdown signal, stop claiming tasks and allow the current request time to finish and persist its outcome. Forced termination relies on lease recovery. Pause claiming and reconnect after a delay when the database is temporarily unavailable. If a delivery outcome cannot be persisted, leave the lease unfinished for recovery; do not claim durable success based on memory alone.
+The worker already stops polling on SIGINT/SIGTERM and lets its current attempt finish. It catches database errors and waits for the configured poll interval before retrying. Phase 4 will validate shutdown during delivery and database outage/recovery boundaries. Forced termination requires the planned lease recovery. If a delivery outcome cannot be persisted, leave the lease unfinished for recovery; do not claim durable success based on memory alone.
 
 ## 7. Retries and Prolonged Failures
 
@@ -128,9 +134,11 @@ On a shutdown signal, stop claiming tasks and allow the current request time to 
 | Network errors, timeouts, HTTP 408 / 429 / 5xx | Retryable |
 | Other HTTP statuses, including 3xx | Immediate failure |
 
-Allow at most five attempts by default, including the initial attempt. The four retry delays have base values of 5, 10, 20, and 40 seconds, with plus or minus 20 percent random jitter. Attempt limits and backoff parameters are configurable for demonstrations and tests.
+Allow at most five attempts by default, including the initial attempt. If configuration lowers the limit below the count of a queued task, the worker marks it failed with `attempt_limit` without sending another request. The four retry delays have base values of 5, 10, 20, and 40 seconds, with plus or minus 20 percent random jitter. Attempt limits and backoff parameters are configurable for demonstrations and tests.
 
 For 429/503, parse valid Retry-After values as seconds or HTTP dates and use the larger of that delay and local backoff. The demonstration caps the final delay at 60 seconds. Ignore invalid values and treat dates in the past as zero. This cap may retry earlier than the provider requested and is intended only for the short demonstration window; production integration must adjust the policy to respect provider waiting requirements.
+
+Attempt records store `succeeded`, `retryable_failure`, or `permanent_failure`, plus status code, sanitized error category, and start/end timestamps. A retryable final attempt retains its retryable outcome even though its task becomes failed. Retry scheduling uses the database result timestamp. Raw Retry-After values are used transiently and are not persisted.
 
 Exhausted attempts and non-retryable errors transition to `failed` with diagnostic records retained. Prolonged outages do not trigger unlimited automatic delivery. An operator may replay after the provider recovers or the issue is investigated. The MVP has no administration UI, automatic alerts, or endpoint for editing failed request content. Changed requests require a new task and a new idempotency key.
 
@@ -138,7 +146,7 @@ Exhausted attempts and non-retryable errors transition to `failed` with diagnost
 
 Unit tests cover validation, content normalization, retry classification, backoff, and Retry-After. Real PostgreSQL integration tests cover concurrent submission deduplication, claiming, lease expiry, stale-token write rejection, crashes during the final attempt, and replay races. A mock provider verifies header and body forwarding, timeouts, redirect handling, and no further delivery after success. Compose demonstrations verify continued processing after worker restart and possible duplicate delivery when results were not persisted.
 
-Logs include task ID, round, attempt count, duration, status code, and sanitized error category. Do not log complete destination URL query strings, credentials, or bodies. A full metrics platform is deferred. Future monitoring should focus on backlog size, age of the oldest pending task, delivery success rate, retries, and final failures.
+Worker logs are JSON objects with event name, task ID, round, attempt count, duration in milliseconds, status code, and sanitized error category as applicable. `attempt_finished` is emitted only after result commit; `outcome_not_saved` reports database failure, and `outcome_discarded` reports a rejected lease result. HTTPX/httpcore request logging is suppressed at INFO level because it includes destination URLs. Exception text and SQL parameters are not logged. Do not log complete destination URL query strings, credentials, or bodies. A full metrics platform is deferred. Future monitoring should focus on backlog size, age of the oldest pending task, delivery success rate, retries, and final failures.
 
 The design omits a separate message broker, Celery, a provider plugin framework, and full administration tooling to control MVP complexity. These are technical choices in the current proposal, not evidence that the user explicitly rejected each technology suggested by the AI. SQLite was discussed as a lighter alternative, but the user selected PostgreSQL and a separate worker.
 
@@ -147,3 +155,9 @@ Evolution should begin with adding workers based on measurements, followed by pr
 Technical references: PostgreSQL [SELECT locking and SKIP LOCKED](https://www.postgresql.org/docs/current/sql-select.html), HTTPX [timeouts](https://www.python-httpx.org/advanced/timeouts/), and uv [project management](https://docs.astral.sh/uv/guides/projects/).
 
 Foundation implementation references: FastAPI [lifespan events](https://fastapi.tiangolo.com/advanced/events/), uv [Docker integration](https://docs.astral.sh/uv/guides/integration/docker/), and SQLAlchemy [PostgreSQL dialect](https://docs.sqlalchemy.org/en/20/dialects/postgresql.html).
+
+## 9. Phase 3 Mock Provider and Verification
+
+`notification_service.mock_provider:create_app` provides a separate FastAPI app for controlled demonstrations. Routes `/{scenario}/{key}` accept all five supported delivery methods. `success` returns 204, `flaky` returns 503 for the first two requests then 204, `permanent` returns 400, `unavailable` always returns 503, and `timeout` delays headers for 30 seconds. Query parameters can adjust `failures` (0–100) and `delay` (0–120 seconds). Temporary failures include `Retry-After: 0`, so local backoff still applies. `/health` reports readiness and `/counts/{scenario}/{key}` reports call counts. Counts are per scenario/key, held in memory, and reset on restart; run one provider process. The provider neither stores nor exposes request credentials or bodies, and its documented command disables access logs.
+
+`compose.demo.yaml` adds the provider on the Compose network and exposes it locally on port 8002. The demo script submits fresh tasks for five scenarios and checks final status and attempt counts. It defaults to five attempts and requires at least three attempts for the flaky scenario. Automated process-level verification runs this script against real PostgreSQL in an isolated schema, independent API/worker/provider processes, ephemeral local ports, and shortened timeouts/backoff. Other tests verify exact methods, query strings, business headers and persisted body bytes; response closure without body reads; no redirects or cookie inheritance; retry policy; concurrent claims; result guards; and claim/result commit failure boundaries. No test contacts a real provider or public API.

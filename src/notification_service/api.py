@@ -91,8 +91,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         result = dict(row)
         code = result.pop("last_status_code")
         category = result.pop("last_error_category")
-        # Treat stored diagnostics as untrusted; future delivery code uses these categories.
-        allowed = {"network_error", "timeout", "http_error", "unknown_outcome"}
+        # Treat stored diagnostics as untrusted; delivery code uses these categories.
+        allowed = {
+            "network_error",
+            "timeout",
+            "http_error",
+            "unknown_outcome",
+            "invalid_request",
+            "attempt_limit",
+        }
         result["latest_attempt"] = (
             {
                 "status_code": code,

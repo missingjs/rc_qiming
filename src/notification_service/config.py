@@ -6,7 +6,9 @@ from sqlalchemy.engine import make_url
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
+    model_config = SettingsConfigDict(
+        env_file=".env", extra="ignore", hide_input_in_errors=True, allow_inf_nan=False
+    )
 
     database_url: str = Field(repr=False)
     worker_poll_seconds: float = Field(default=1, gt=0)

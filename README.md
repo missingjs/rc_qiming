@@ -6,7 +6,7 @@ The project follows an API notification system assignment, emphasizing system bo
 
 ## Current Status
 
-Phases 1 and 2 provide configuration, database models and migrations, API health checks, a separate worker scaffold, Docker Compose, durable submission, and status queries with concurrent idempotency protection. Delivery, retries, and replay are not implemented yet. The worker reports database readiness but does not claim or deliver tasks.
+Phases 1 through 3 provide durable submission, concurrent idempotency protection, status queries, independent HTTP delivery, bounded retries, attempt records, Docker Compose, and a mock provider. Expired-lease recovery and replay are not implemented yet: a crash or unsaved outcome can leave a task in `in_progress` until phase 4 adds recovery.
 
 The stack is Python 3.14, FastAPI, uv, PostgreSQL 17, SQLAlchemy, psycopg, Alembic, and HTTPX. Runtime and development dependencies are locked in `uv.lock`.
 
@@ -58,7 +58,7 @@ uv run --locked alembic current
 uv run --locked alembic check
 ```
 
-Environment variables override `.env`. `DATABASE_URL` is required and must use `postgresql+psycopg`. See [.env.example](.env.example) for scheduling defaults. Delivery settings are validated now but will be used by later milestones. The lease must exceed the total delivery timeout by at least five seconds.
+Environment variables override `.env`. `DATABASE_URL` is required and must use `postgresql+psycopg`. See [.env.example](.env.example) for scheduling defaults. The worker uses these settings for polling, HTTP timeouts, leases, retry limits, and backoff. The lease must exceed the total delivery timeout by at least five seconds.
 
 ## Verification
 
@@ -77,17 +77,47 @@ TEST_DATABASE_URL=postgresql+psycopg://notifications:notifications@localhost:554
 
 Adjust credentials and port if you changed the defaults. If the test database already exists, skip `createdb`. Each database test creates and removes its own randomly named schema. The test user needs schema creation privileges; do not point tests at a production database. Without `TEST_DATABASE_URL`, PostgreSQL integration tests are explicitly skipped.
 
-Tests cover configuration validation, liveness during database failure, missing-schema readiness, migration upgrade/downgrade/re-upgrade, model/migration consistency, scheduling indexes, binary body persistence, and database uniqueness and foreign-key constraints. Submission tests additionally cover validation and redaction, canonical request comparison, persisted body bytes, status queries, eight concurrent matching or conflicting submissions, and rollback on an injected commit failure. All database behavior tests use real PostgreSQL; no real provider is contacted.
+Tests cover configuration validation, liveness during database failure, missing-schema readiness, migration upgrade/downgrade/re-upgrade, model/migration consistency, scheduling indexes, binary body persistence, and database uniqueness and foreign-key constraints. Submission tests additionally cover validation and redaction, canonical request comparison, persisted body bytes, status queries, eight concurrent matching or conflicting submissions, and rollback on an injected commit failure. Delivery tests cover status classification, backoff/jitter, Retry-After, deadlines, unread response bodies, redirects, cookie isolation, forwarding, concurrent claims, and claim/result transaction failures. A process-level test starts independent API, worker, and mock-provider processes and runs the five-scenario demo script with short timing settings. All database behavior tests use real PostgreSQL; no real provider is contacted.
+
+## Delivery Demonstration
+
+For a local demonstration without rebuilding images, start the API and worker using the local development commands above. Start the mock provider in another terminal:
+
+```bash
+uv run --locked uvicorn notification_service.mock_provider:create_app --factory --host 127.0.0.1 --port 8002 --no-access-log
+```
+
+Then run the five-scenario demonstration (normally a few minutes with default timeouts):
+
+```bash
+uv run --locked python scripts/demo_delivery.py --provider-base http://127.0.0.1:8002
+```
+
+Expected outcomes: `success` succeeds in one attempt, `flaky` succeeds in three, `permanent` fails in one, and `unavailable` and `timeout` fail after five attempts. The script uses new tasks each time and exits nonzero on unexpected results. If you change `MAX_ATTEMPTS`, pass the matching `--max-attempts` value (at least three). The timeout scenario requires the worker's delivery timeout to stay below the provider's 30-second delay. Tasks and attempt history remain in the demonstration database.
+
+The same demonstration is available through the Compose overlay:
+
+```bash
+docker compose -f compose.yaml -f compose.demo.yaml config --quiet
+docker compose -f compose.yaml -f compose.demo.yaml up --build -d --wait
+uv run --locked python scripts/demo_delivery.py
+```
+
+Verification status: the overlay configuration was validated, but the latest image build timed out after 120 seconds during dependency downloads. Updated container startup has not been verified. The same demo script passed using independent local API, worker, and provider processes against real PostgreSQL.
+
+The default script provider URL is `http://mock-provider:8000`, reachable from the container worker. Host workers must use `--provider-base http://127.0.0.1:8002`. Run a single provider process because its counters are in memory. The overlay publishes the provider on localhost port 8002. Stop the demo containers while retaining database data with `docker compose -f compose.yaml -f compose.demo.yaml down`.
+
+Worker logs contain JSON events and sanitized results. The worker does not follow redirects, read provider response bodies, retain provider cookies, or inherit environment HTTP proxies. Forced-stop recovery and manual replay remain phase 4 work.
 
 ## Submit and Query Notifications
 
-With Compose running, submit a task (this demonstration key can be reused):
+With the Compose demonstration running, submit a task (this demonstration key can be reused):
 
 ```bash
 curl --fail-with-body -i http://localhost:8000/notifications \
   -H 'Content-Type: application/json' \
-  -H 'Idempotency-Key: demo:phase2' \
-  -d '{"url":"https://example.test/events","json_body":{"event":"registered"}}'
+  -H 'Idempotency-Key: demo:phase3' \
+  -d '{"url":"http://mock-provider:8000/success/manual","json_body":{"event":"registered"}}'
 ```
 
 The response is `202` with `id`, `status`, and `status_url`. Copy the returned `status_url` into the query command:
@@ -96,7 +126,7 @@ The response is `202` with `id`, `status`, and `status_url`. Copy the returned `
 curl --fail http://localhost:8000/notifications/REPLACE_WITH_RETURNED_ID
 ```
 
-Repeat the submission unchanged to receive the same task ID. Changing content with the same key returns `409`; omit the key to create a new task each time. Invalid input returns `422`, and database errors return `503`. Acceptance occurs only after commit. Queries return status, counters, timestamps, and a sanitized latest attempt summary, without request data. Tasks remain `pending` because delivery belongs to phase 3.
+Repeat the submission unchanged to receive the same task ID. Changing content with the same key returns `409`; omit the key to create a new task each time. Invalid input returns `422`, and database errors return `503`. Acceptance occurs only after commit. Queries return status, counters, timestamps, and a sanitized latest attempt summary, without request data. The worker moves due tasks through `in_progress` to `succeeded`, `retry_wait`, or `failed`; `latest_attempt` reports the most recent HTTP code or sanitized error category.
 
 Supported methods are GET, POST (default), PUT, PATCH, and DELETE. Supply at most one of `json_body` or `text_body`; JSON null is a body, while omission means no body. JSON uses `application/json`; text defaults to `text/plain; charset=utf-8`. See [DESIGN.md](DESIGN.md) for header restrictions and exact idempotency comparison rules.
 
@@ -114,7 +144,7 @@ Business system submits request -> PostgreSQL persists task -> Task ID returned
 
 Callers prepare the URL, headers, and body. The service acknowledges acceptance only after persistence, without waiting for the provider response. Duplicate delivery is possible and automatic retries are bounded. HTTP success does not prove provider business success; business deduplication requires cooperation between the caller and provider.
 
-The first version is for a trusted internal demonstration. Authentication, destination allowlists, provider adapters, and an administration UI are out of scope. A mock provider and full notification demonstrations will be added in later phases.
+The first version is for a trusted internal demonstration. Authentication, destination allowlists, provider adapters, and an administration UI are out of scope. The mock provider supports delivery demonstrations; crash recovery and replay demonstrations will be added in later phases.
 
 ## Documentation
 

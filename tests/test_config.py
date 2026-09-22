@@ -10,6 +10,8 @@ from notification_service.config import Settings
         {"database_url": "sqlite:///test.db"},
         {"lease_seconds": 19, "delivery_timeout_seconds": 15},
         {"worker_poll_seconds": 0},
+        {"delivery_timeout_seconds": float("inf")},
+        {"retry_max_seconds": float("nan")},
         {"max_attempts": 0},
         {"retry_base_seconds": 10, "retry_max_seconds": 5},
     ],

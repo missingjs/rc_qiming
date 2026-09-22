@@ -2,7 +2,7 @@
 
 ## Scope of This Record
 
-This document records actual AI collaboration on the project and will evolve during development. Work completed so far includes requirements discussions, design, project documentation, and the phase 1 and 2 implementations. The foundation, durable submission, status queries, and their tests are implemented; delivery remains planned. Reasons offered by the AI are not automatically attributed to the author as personal motivations.
+This document records actual AI collaboration on the project and will evolve during development. Work completed so far includes requirements discussions, design, project documentation, and the phase 1 through 3 implementations. The foundation, durable submission, status queries, independent delivery, bounded retries, mock provider, and their tests are implemented; expired-lease recovery and replay remain planned. Reasons offered by the AI are not automatically attributed to the author as personal motivations.
 
 ## AI Contributions
 
@@ -68,3 +68,13 @@ The AI selected explicit validation defaults for keys (one header, 1–200 visib
 Verification: 38 tests passed against real PostgreSQL, including two eight-request concurrency scenarios, independently observed persistence after acceptance, commit-stage failure injection and rollback, validation/redaction, safe status queries, and existing migration checks. Ruff lint and formatting checks passed. The initial sandboxed test process stalled and was interrupted; the complete suite succeeded with local database access authorized. The same two upstream TestClient deprecation warnings remain. Delivery, retries, recovery, and replay were not implemented or tested in this phase. No Git commit or push was performed.
 
 Live HTTP verification also passed against a temporary Uvicorn process on port 8001 connected to the local Compose PostgreSQL database: readiness 200, submission 202, repeated submission with the same ID, conflicting submission 409, invalid submission 422, and status query 200. The `demo:phase2` task remains as demonstration data. The temporary API was stopped afterward. A fresh Compose build was interrupted because dependency downloads stalled; the updated container startup was not verified. Existing Compose containers were retained.
+
+## Phase 3 Implementation Record
+
+At the user's request, the AI implemented independent delivery and retries: short PostgreSQL claim/result transactions, attempt records and lease tokens, an asyncio worker, HTTPX streaming delivery, status classification, bounded exponential backoff with jitter, Retry-After parsing, and structured JSON logs. It added an in-memory mock provider, a Compose demonstration overlay, and a reusable five-scenario demo script. No schema or dependency changes were required.
+
+Implementation choices made by the AI include finite timing validation; explicit permanent failure for invalid client-side requests; disabling environment proxies; constructing requests without inherited provider cookies; clearing the cookie jar; and suppressing HTTPX INFO logs that contain URLs. Result writes already check tokens and lease expiry, since safe result persistence needs that guard. Expired-lease recovery and replay remain unimplemented. Basic signal handling and database polling retries exist, but the broader phase 4 failure/recovery acceptance suite has not been performed.
+
+Verification completed: Ruff lint and format checks; 88 passing tests with real PostgreSQL; exact forwarding, no response body consumption, redirect and cookie behavior; retry timing and exhaustion; concurrent claiming; and claim/result commit failure injection. A process-level integration test launched independent API, worker, and mock-provider processes, ran the documented demo script over local HTTP, and verified all five scenarios, including five-attempt timeout exhaustion. Test data used isolated schemas and no real provider or public API. Temporary processes were stopped and schemas removed. Compose overlay syntax/merge validation passed. Two upstream TestClient deprecation warnings remain. No Git commit or push was performed.
+
+A new Compose image build was attempted with a 120-second limit. It timed out while uv was downloading locked dependencies; updated container startup was not verified, and existing containers were not replaced. This environment limitation is recorded separately from the successful local process-level delivery verification.

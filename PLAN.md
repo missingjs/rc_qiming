@@ -2,7 +2,7 @@
 
 ## Current Status and Scope
 
-Phases 1 and 2 are complete: the foundation, durable notification submission, idempotency, and status queries are implemented and verified. Delivery is not implemented yet. See [DESIGN.md](DESIGN.md) for behavior contracts and proposed defaults. This plan covers the minimum reliable delivery workflow, excluding production deployment and provider-specific business adapters.
+Phases 1 through 3 are complete: the foundation, durable submission, idempotency, queries, independent HTTP delivery, bounded retries, and mock provider are implemented and verified. Expired-lease recovery and replay remain planned. See [DESIGN.md](DESIGN.md) for behavior contracts and proposed defaults. This plan covers the minimum reliable delivery workflow, excluding production deployment and provider-specific business adapters.
 
 - [x] Review the original requirements and confirm the technology stack and MVP boundaries.
 - [x] Create the README, collaboration guidelines, implementation plan, design, and AI usage statement.
@@ -30,12 +30,14 @@ Verification: Ruff lint and formatting checks passed. All 38 tests passed, inclu
 
 ## Phase 3: Delivery and Retries
 
-- [ ] Implement short claim transactions, lease tokens, independent worker polling, and HTTP delivery.
-- [ ] Implement timeouts, status classification, backoff, jitter, Retry-After handling, and attempt limits.
-- [ ] Persist attempt outcomes and diagnostic information, and provide structured logs without sensitive content.
-- [ ] Add a mock provider supporting success, temporary failures followed by success, permanent failures, and timeouts.
+- [x] Implement short claim transactions, lease tokens, independent worker polling, and HTTP delivery.
+- [x] Implement timeouts, status classification, backoff, jitter, Retry-After handling, and attempt limits.
+- [x] Persist attempt outcomes and diagnostic information, and provide structured logs without sensitive content.
+- [x] Add a mock provider supporting success, temporary failures followed by success, permanent failures, and timeouts.
 
 Acceptance: URLs, methods, business headers, and bodies are delivered according to the contract. Success stops retries, retryable failures are rescheduled, and permanent failures or exhausted attempts become failed tasks. No claim transaction remains open while waiting for HTTP responses.
+
+Verification: all 88 tests passed, including real PostgreSQL transactions, four concurrent claimers, five supported HTTP methods and body variants, retry scheduling and exhaustion, result-token and expiry guards, and injected claim/result commit failures. The demo script passed with independent API, worker, and mock-provider processes using real local HTTP: success in one attempt, temporary failures followed by success in three, permanent failure in one, and unavailable/timeout failures in five. Ruff lint and formatting checks passed. Compose overlay configuration validation passed. The new image build timed out after 120 seconds while downloading locked dependencies, so updated container startup was not verified; existing containers were not replaced. Two upstream TestClient deprecation warnings remain.
 
 ## Phase 4: Recovery and Manual Replay
 
@@ -56,4 +58,4 @@ Acceptance: following the README reproduces successful delivery, recovery from t
 
 ## Execution and Maintenance
 
-Complete phases in order; each depends on the preceding phase. If implementation reveals a design issue, update the relevant DESIGN contract and rationale, then align acceptance criteria. Phases 1 and 2 have passed acceptance; phases 3 through 5 remain unstarted. The phase 1 worker is a readiness-checking process scaffold and does not implement delivery or the recovery behavior planned for later phases.
+Complete phases in order; each depends on the preceding phase. If implementation reveals a design issue, update the relevant DESIGN contract and rationale, then align acceptance criteria. Phases 1 through 3 have passed acceptance. Phase 4 remains incomplete and phase 5 remains unstarted. Phase 3 already guards result writes with lease tokens and expiry and includes basic signal handling/database retry polling, but expired-lease recovery, replay, and the full crash/shutdown/outage acceptance suite remain phase 4 work. Tasks can currently remain in_progress after a crash or unsaved result.
