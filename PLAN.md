@@ -2,7 +2,7 @@
 
 ## Current Status and Scope
 
-Phases 1 through 3 are complete: the foundation, durable submission, idempotency, queries, independent HTTP delivery, bounded retries, and mock provider are implemented and verified. Expired-lease recovery and replay remain planned. See [DESIGN.md](DESIGN.md) for behavior contracts and proposed defaults. This plan covers the minimum reliable delivery workflow, excluding production deployment and provider-specific business adapters.
+Phases 1 through 4 are complete: the foundation, durable submission, idempotency, queries, delivery, retries, expired-lease recovery, manual replay, and mock provider are implemented and verified. Phase 5 remains for CI and final Compose verification. See [DESIGN.md](DESIGN.md) for behavior contracts and proposed defaults. This plan covers the minimum reliable delivery workflow, excluding production deployment and provider-specific business adapters.
 
 - [x] Review the original requirements and confirm the technology stack and MVP boundaries.
 - [x] Create the README, collaboration guidelines, implementation plan, design, and AI usage statement.
@@ -41,11 +41,13 @@ Verification: all 88 tests passed, including real PostgreSQL transactions, four 
 
 ## Phase 4: Recovery and Manual Replay
 
-- [ ] Implement expired lease recovery and protection against writes using stale lease tokens.
-- [ ] Implement graceful shutdown, backlog processing after restart, and recovery from temporary database unavailability.
-- [ ] Allow replay only for failed tasks, retain attempt history, and prevent concurrent duplicate replays.
+- [x] Implement expired lease recovery and protection against writes using stale lease tokens.
+- [x] Implement graceful shutdown, backlog processing after restart, and recovery from temporary database unavailability.
+- [x] Allow replay only for failed tasks, retain attempt history, and prevent concurrent duplicate replays.
 
 Acceptance: tests against real PostgreSQL confirm that multiple workers cannot claim the same valid lease simultaneously. Tasks recover after crashes, stale workers cannot overwrite newer results, and a crash on the final attempt cannot cause unlimited retries. Verify that delivery may repeat when the provider accepted a request but the local outcome was not saved.
+
+Verification: all 106 tests passed against real PostgreSQL. New checks cover eight concurrent reclaimers, stale tokens after recovery and replay, recovery/replay commit rollback, eight concurrent replay requests, and a delayed replay that cannot consume a newer failed round. Independent processes passed SIGINT/SIGTERM drain and restart/backlog checks, SIGKILL recovery after natural lease expiry, final-attempt crash exhaustion, and connection loss/restoration through a local PostgreSQL TCP relay. The provider-success/database-failure scenario produced exactly two provider calls with unknown-outcome then succeeded attempt history. After extending the demo script, its process-level test also passed with `--replay`, verifying the same task succeeds in round 2. Ruff lint/format checks and whitespace checks passed. Two upstream TestClient deprecation warnings remain. Compose image building and container startup were not rerun in this phase; the phase 3 download limitation and phase 5 verification work remain.
 
 ## Phase 5: Delivery and Verification
 
@@ -58,4 +60,4 @@ Acceptance: following the README reproduces successful delivery, recovery from t
 
 ## Execution and Maintenance
 
-Complete phases in order; each depends on the preceding phase. If implementation reveals a design issue, update the relevant DESIGN contract and rationale, then align acceptance criteria. Phases 1 through 3 have passed acceptance. Phase 4 remains incomplete and phase 5 remains unstarted. Phase 3 already guards result writes with lease tokens and expiry and includes basic signal handling/database retry polling, but expired-lease recovery, replay, and the full crash/shutdown/outage acceptance suite remain phase 4 work. Tasks can currently remain in_progress after a crash or unsaved result.
+Complete phases in order; each depends on the preceding phase. If implementation reveals a design issue, update the relevant DESIGN contract and rationale, then align acceptance criteria. Phases 1 through 4 have passed acceptance. Phase 5 remains unstarted. Local process tests now verify recovery, shutdown, database connection interruptions, and replay; updated Compose runtime verification and CI remain outstanding. Duplicate delivery remains possible when the provider accepts a request but the local result is lost.

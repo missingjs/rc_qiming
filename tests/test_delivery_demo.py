@@ -94,6 +94,7 @@ def test_independent_process_delivery_demo(migrated_database, tmp_path):
                 [
                     sys.executable,
                     "scripts/demo_delivery.py",
+                    "--replay",
                     "--api-base",
                     f"http://127.0.0.1:{api_port}",
                     "--provider-base",
@@ -110,6 +111,7 @@ def test_independent_process_delivery_demo(migrated_database, tmp_path):
             assert "All delivery demonstrations passed." in result.stdout
             assert "flaky: succeeded, attempts=3" in result.stdout
             assert "timeout: failed, attempts=5" in result.stdout
+            assert "replay: succeeded, attempts=1, round=2" in result.stdout
         finally:
             for process in reversed(processes):
                 process.terminate()

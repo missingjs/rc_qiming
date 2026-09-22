@@ -6,7 +6,7 @@ The project follows an API notification system assignment, emphasizing system bo
 
 ## Current Status
 
-Phases 1 through 3 provide durable submission, concurrent idempotency protection, status queries, independent HTTP delivery, bounded retries, attempt records, Docker Compose, and a mock provider. Expired-lease recovery and replay are not implemented yet: a crash or unsaved outcome can leave a task in `in_progress` until phase 4 adds recovery.
+Phases 1 through 4 provide durable submission, concurrent idempotency protection, queries, independent HTTP delivery, bounded retries, attempt records, expired-lease recovery, manual replay, Docker Compose configuration, and a mock provider. Crash, shutdown, and database connection recovery are verified against real PostgreSQL. CI and updated Compose runtime verification remain phase 5 work.
 
 The stack is Python 3.14, FastAPI, uv, PostgreSQL 17, SQLAlchemy, psycopg, Alembic, and HTTPX. Runtime and development dependencies are locked in `uv.lock`.
 
@@ -77,7 +77,7 @@ TEST_DATABASE_URL=postgresql+psycopg://notifications:notifications@localhost:554
 
 Adjust credentials and port if you changed the defaults. If the test database already exists, skip `createdb`. Each database test creates and removes its own randomly named schema. The test user needs schema creation privileges; do not point tests at a production database. Without `TEST_DATABASE_URL`, PostgreSQL integration tests are explicitly skipped.
 
-Tests cover configuration validation, liveness during database failure, missing-schema readiness, migration upgrade/downgrade/re-upgrade, model/migration consistency, scheduling indexes, binary body persistence, and database uniqueness and foreign-key constraints. Submission tests additionally cover validation and redaction, canonical request comparison, persisted body bytes, status queries, eight concurrent matching or conflicting submissions, and rollback on an injected commit failure. Delivery tests cover status classification, backoff/jitter, Retry-After, deadlines, unread response bodies, redirects, cookie isolation, forwarding, concurrent claims, and claim/result transaction failures. A process-level test starts independent API, worker, and mock-provider processes and runs the five-scenario demo script with short timing settings. All database behavior tests use real PostgreSQL; no real provider is contacted.
+Tests cover configuration validation, liveness during database failure, missing-schema readiness, migration upgrade/downgrade/re-upgrade, model/migration consistency, scheduling indexes, binary body persistence, and database uniqueness and foreign-key constraints. Submission tests additionally cover validation and redaction, canonical request comparison, persisted body bytes, status queries, eight concurrent matching or conflicting submissions, and rollback on an injected commit failure. Delivery tests cover status classification, backoff/jitter, Retry-After, deadlines, unread response bodies, redirects, cookie isolation, forwarding, concurrent claims, and claim/result transaction failures. A process-level test starts independent API, worker, and mock-provider processes and runs the five-scenario demo script with short timing settings. Recovery tests add real worker signals and kills, natural lease expiry, final-attempt crashes, stale-result rejection, concurrent replay, and selective database connection loss through a local TCP relay. The relay affects only test connections and does not stop the shared database. All database behavior tests use real PostgreSQL; no real provider is contacted.
 
 ## Delivery Demonstration
 
@@ -107,7 +107,7 @@ Verification status: the overlay configuration was validated, but the latest ima
 
 The default script provider URL is `http://mock-provider:8000`, reachable from the container worker. Host workers must use `--provider-base http://127.0.0.1:8002`. Run a single provider process because its counters are in memory. The overlay publishes the provider on localhost port 8002. Stop the demo containers while retaining database data with `docker compose -f compose.yaml -f compose.demo.yaml down`.
 
-Worker logs contain JSON events and sanitized results. The worker does not follow redirects, read provider response bodies, retain provider cookies, or inherit environment HTTP proxies. Forced-stop recovery and manual replay remain phase 4 work.
+Worker logs contain JSON events and sanitized results. The worker does not follow redirects, read provider response bodies, retain provider cookies, or inherit environment HTTP proxies. On SIGINT/SIGTERM, the worker finishes its current attempt before exiting. After a forced stop, another worker recovers the task once its lease expires; a final-attempt crash becomes a failed task with `unknown_outcome`. If a provider accepted the request before a crash or database failure, recovery may deliver it again.
 
 ## Submit and Query Notifications
 
@@ -130,6 +130,33 @@ Repeat the submission unchanged to receive the same task ID. Changing content wi
 
 Supported methods are GET, POST (default), PUT, PATCH, and DELETE. Supply at most one of `json_body` or `text_body`; JSON null is a body, while omission means no body. JSON uses `application/json`; text defaults to `text/plain; charset=utf-8`. See [DESIGN.md](DESIGN.md) for header restrictions and exact idempotency comparison rules.
 
+## Replay and Recovery
+
+Replay only failed tasks, using the ID returned by submission:
+
+```bash
+curl --fail-with-body -i -X POST http://localhost:8000/notifications/REPLACE_WITH_FAILED_ID/replay
+curl --fail http://localhost:8000/notifications/REPLACE_WITH_FAILED_ID
+```
+
+A successful replay returns `202`, keeps the same task ID and request, increments `round`, resets `attempt_count` to zero, and schedules immediate delivery. History remains intact. The latest summary may still describe the previous round until a new attempt completes. Other states return `409`, missing tasks return `404`, and database errors return `503`. If the replay response is lost, query the round before replaying again.
+
+To demonstrate failure followed by a successful replay with the running local API, worker, and mock provider:
+
+```bash
+uv run --locked python scripts/demo_delivery.py --provider-base http://127.0.0.1:8002 --replay
+```
+
+For a container worker, omit `--provider-base`. The added scenario fails after five attempts in round 1 and succeeds in one attempt in round 2, using the same request and task ID. Pass the matching `--max-attempts` value if configured differently (3–100 for this demo).
+
+To reproduce the isolated recovery checks against the dedicated test database:
+
+```bash
+TEST_DATABASE_URL=postgresql+psycopg://notifications:notifications@localhost:55432/notifications_test uv run --locked pytest -v tests/test_recovery.py tests/test_recovery_processes.py
+```
+
+These tests start and clean up their own mock provider, worker processes, TCP relay, and database schemas. They verify graceful drain, backlog processing after restart, SIGKILL with natural lease expiry, final-attempt exhaustion, and duplicate delivery after a provider response could not be persisted. They do not terminate an existing development worker or stop the database. With default service settings, production-like manual observation of a crashed task requires waiting for its 60-second lease; these tests use seven-second leases.
+
 ## Intended Notification Workflow
 
 ```text
@@ -144,7 +171,7 @@ Business system submits request -> PostgreSQL persists task -> Task ID returned
 
 Callers prepare the URL, headers, and body. The service acknowledges acceptance only after persistence, without waiting for the provider response. Duplicate delivery is possible and automatic retries are bounded. HTTP success does not prove provider business success; business deduplication requires cooperation between the caller and provider.
 
-The first version is for a trusted internal demonstration. Authentication, destination allowlists, provider adapters, and an administration UI are out of scope. The mock provider supports delivery demonstrations; crash recovery and replay demonstrations will be added in later phases.
+The first version is for a trusted internal demonstration. Authentication, destination allowlists, provider adapters, and an administration UI are out of scope. The mock provider supports delivery demonstrations; replay and process-level recovery demonstrations are available, while Compose runtime verification remains phase 5 work.
 
 ## Documentation
 

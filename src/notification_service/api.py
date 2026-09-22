@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from notification_service.config import Settings
 from notification_service.database import build_engine, database_ready
 from notification_service.models import Notification
+from notification_service.replay import NotificationNotFound, ReplayConflict, replay
 from notification_service.submissions import IdempotencyConflict, Submission, submit
 
 
@@ -63,6 +64,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             result = submit(request.app.state.engine, body, key)
         except IdempotencyConflict:
             raise HTTPException(409, "Idempotency key already used for different content") from None
+        return JSONResponse(result, status_code=202, headers={"Location": result["status_url"]})
+
+    @app.post("/notifications/{notification_id}/replay", status_code=202)
+    def replay_notification(notification_id: UUID, request: Request) -> JSONResponse:
+        try:
+            result = replay(request.app.state.engine, notification_id)
+        except NotificationNotFound:
+            raise HTTPException(404, "Notification not found") from None
+        except ReplayConflict:
+            raise HTTPException(409, "Only the current failed round can be replayed") from None
         return JSONResponse(result, status_code=202, headers={"Location": result["status_url"]})
 
     @app.get("/notifications/{notification_id}")

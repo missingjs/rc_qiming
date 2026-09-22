@@ -2,7 +2,7 @@
 
 ## Scope of This Record
 
-This document records actual AI collaboration on the project and will evolve during development. Work completed so far includes requirements discussions, design, project documentation, and the phase 1 through 3 implementations. The foundation, durable submission, status queries, independent delivery, bounded retries, mock provider, and their tests are implemented; expired-lease recovery and replay remain planned. Reasons offered by the AI are not automatically attributed to the author as personal motivations.
+This document records actual AI collaboration on the project and will evolve during development. Work completed so far includes requirements discussions, design, project documentation, and the phase 1 through 4 implementations. The foundation, submission, queries, delivery, retries, mock provider, lease recovery, replay, and their tests are implemented; CI and final Compose verification remain planned. Reasons offered by the AI are not automatically attributed to the author as personal motivations.
 
 ## AI Contributions
 
@@ -78,3 +78,13 @@ Implementation choices made by the AI include finite timing validation; explicit
 Verification completed: Ruff lint and format checks; 88 passing tests with real PostgreSQL; exact forwarding, no response body consumption, redirect and cookie behavior; retry timing and exhaustion; concurrent claiming; and claim/result commit failure injection. A process-level integration test launched independent API, worker, and mock-provider processes, ran the documented demo script over local HTTP, and verified all five scenarios, including five-attempt timeout exhaustion. Test data used isolated schemas and no real provider or public API. Temporary processes were stopped and schemas removed. Compose overlay syntax/merge validation passed. Two upstream TestClient deprecation warnings remain. No Git commit or push was performed.
 
 A new Compose image build was attempted with a 120-second limit. It timed out while uv was downloading locked dependencies; updated container startup was not verified, and existing containers were not replaced. This environment limitation is recorded separately from the successful local process-level delivery verification.
+
+## Phase 4 Implementation Record
+
+At the user's request to continue the next phase, the AI implemented recovery of expired in-progress tasks and the failed-task replay endpoint. Recovery atomically records an unknown previous outcome, either creates the next leased attempt or terminates an exhausted task, and logs only after commit. Replay preserves the original request and history and uses the observed round plus failed state in its conditional update. The round check was an AI implementation choice to prevent an already waiting replay from consuming a newer failed round. The existing worker shutdown, connection pre-ping, and database retry loop passed the new process-level checks without requiring runtime changes. No schema or dependency changes were needed.
+
+The AI added PostgreSQL recovery/replay race and rollback tests, process-level SIGINT/SIGTERM/SIGKILL tests, and a local TCP relay that disconnects only test worker database connections. Tests wait for real seven-second lease expiry after process kills. The relay verifies recovery before claiming and after a successful mock provider response cannot be saved, without stopping the shared database. The delivery demonstration script now supports `--replay`, and its independent-process test verifies round 1 failure followed by round 2 success with the same task ID.
+
+Verification completed: 106 passing tests against real PostgreSQL, followed by a passing targeted process-level test after adding the replay demonstration. Eight simultaneous replay requests produced one acceptance; stale results and delayed replays were rejected. A provider-success/database-loss case recorded two provider calls and unknown-outcome/succeeded attempt history. The final-attempt crash case recorded failure without a second call. Ruff lint/format and whitespace checks passed. The same two upstream TestClient deprecation warnings remain. Temporary processes, relay sockets, and test schemas were cleaned up. No real provider or public API was contacted.
+
+Compose image building and container startup were not rerun in phase 4; the previous dependency download limitation remains recorded, and phase 5 will complete the remaining runtime verification. No Git commit or push was performed. No additional user technology choices or rejected suggestions were inferred.
