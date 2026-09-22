@@ -1,5 +1,11 @@
 # AI Usage Statement
 
+## Post-Review Header Validation Fix
+
+The AI review reproduced a mismatch: submission validation accepted header values with leading or trailing spaces, but the HTTP/1.1 transport rejected them. The user approved rejecting these values with `422` without trimming them, preserving the existing contract for business headers. The AI implemented the validation, documented its rationale in DESIGN, and added four invalid-input regression cases plus three cases checking preservation of empty values and interior spaces.
+
+Verification: 70 non-integration tests passed, including the new cases; Ruff lint, formatting, and whitespace checks passed. The 43 database integration cases were deselected, and Compose and hosted CI were not rerun. Two existing dependency deprecation warnings remain. No schema or dependency changes were required.
+
 ## Scope of This Record
 
 This document records actual AI collaboration on the project and will evolve during development. Work completed so far includes requirements discussions, design, project documentation, and all five implementation phases. The service, mock provider, recovery/replay, tests, CI configuration, and local Compose verification are complete. The first GitHub-hosted workflow execution remains pending a push. Reasons offered by the AI are not automatically attributed to the author as personal motivations.

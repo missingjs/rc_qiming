@@ -48,6 +48,10 @@ def offline_client():
         {"headers": {"X-Token": "secret", "x-token": "other"}},
         {"headers": {"Bad Name": "secret"}},
         {"headers": {"X-Token": "secret\r\nInjected: yes"}},
+        {"headers": {"Authorization": " Bearer secret"}},
+        {"headers": {"Authorization": "Bearer secret "}},
+        {"headers": {"X-Token": " secret "}},
+        {"headers": {"X-Token": " "}},
         {"headers": {"X-Token": 123}},
         {"text_body": "\ud800"},
     ],
@@ -60,6 +64,12 @@ def test_invalid_submission_is_redacted(offline_client, changes):
     )
     assert response.status_code == 422
     assert response.json() == {"detail": "Invalid request"}
+
+
+@pytest.mark.parametrize("value", ["", "Bearer secret", "one  two"])
+def test_valid_header_values_are_preserved(value):
+    request = Submission(url="https://example.test", headers={"X-Token": value})
+    assert request.persisted_request()["headers"]["x-token"] == value
 
 
 @pytest.mark.parametrize("key", ["", "has space", "x" * 201])

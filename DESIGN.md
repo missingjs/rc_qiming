@@ -59,7 +59,7 @@ Docker Compose provides PostgreSQL, a one-time migration service, the API, and t
 | `json_body` | Optional JSON value; mutually exclusive with text_body |
 | `text_body` | Optional UTF-8 text; mutually exclusive with json_body |
 
-Unknown fields, unsupported methods, non-string headers, malformed or incomplete URLs, non-finite JSON numbers, and invalid UTF-8 are rejected. Methods use uppercase names. Header names must be HTTP tokens, and values must contain printable ASCII only; case-insensitive duplicate names are rejected. These restrictions catch requests that cannot be forwarded safely before acceptance.
+Unknown fields, unsupported methods, non-string headers, malformed or incomplete URLs, non-finite JSON numbers, and invalid UTF-8 are rejected. Methods use uppercase names. Header names must be HTTP tokens, and values must contain printable ASCII only, without leading or trailing spaces; case-insensitive duplicate names are rejected. Empty values and interior spaces are allowed and preserved. Values with boundary spaces return `422` because the HTTP transport rejects them. The service does not trim values, which could change credentials or signatures. These restrictions catch requests that cannot be forwarded safely before acceptance.
 
 Requests may omit the body. Field presence distinguishes an absent JSON body from JSON `null`. JSON is serialized as compact UTF-8 with sorted object keys and `Content-Type: application/json`, overriding any supplied Content-Type. Explicit `text_body: null` is invalid. For text, callers specify Content-Type or it defaults to UTF-8 text/plain. Retries send the same persisted body content. Files, multipart forms, and raw binary data are outside the first version.
 

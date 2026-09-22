@@ -66,6 +66,8 @@ class Submission(BaseModel):
             names.add(normalized)
             if any(ord(char) < 32 or ord(char) > 126 for char in value):
                 raise ValueError("Header values must contain printable ASCII only")
+            if value.startswith(" ") or value.endswith(" "):
+                raise ValueError("Header values must not contain leading or trailing spaces")
         # Reject non-finite numbers and unpaired surrogates before persistence.
         try:
             json_bytes(self.model_dump())

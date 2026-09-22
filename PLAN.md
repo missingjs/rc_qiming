@@ -62,4 +62,6 @@ Verification: locked dependency synchronization, Ruff lint/format checks, all 10
 
 ## Execution and Maintenance
 
+- [x] Post-review header validation: reject leading/trailing spaces with `422`, preserve empty values and interior spaces, and document the contract. Acceptance passed with 70 non-integration tests and Ruff lint/format checks; database integration and Compose checks were not rerun for this validation-only change.
+
 Complete phases in order; each depends on the preceding phase. If implementation reveals a design issue, update the relevant DESIGN contract and rationale, then align acceptance criteria. All five phases have passed local acceptance. CI will repeat the tests and Compose checks on pushes and pull requests. Its first hosted result remains to be observed after pushing the workflow. Duplicate delivery remains possible when the provider accepts a request but the local result is lost; production hardening remains outside the MVP.
