@@ -2,7 +2,7 @@
 
 ## Scope of This Record
 
-This document records actual AI collaboration on the project and will evolve during development. Work completed so far includes requirements discussions, design, project documentation, and the phase 1 through 4 implementations. The foundation, submission, queries, delivery, retries, mock provider, lease recovery, replay, and their tests are implemented; CI and final Compose verification remain planned. Reasons offered by the AI are not automatically attributed to the author as personal motivations.
+This document records actual AI collaboration on the project and will evolve during development. Work completed so far includes requirements discussions, design, project documentation, and all five implementation phases. The service, mock provider, recovery/replay, tests, CI configuration, and local Compose verification are complete. The first GitHub-hosted workflow execution remains pending a push. Reasons offered by the AI are not automatically attributed to the author as personal motivations.
 
 ## AI Contributions
 
@@ -88,3 +88,13 @@ The AI added PostgreSQL recovery/replay race and rollback tests, process-level S
 Verification completed: 106 passing tests against real PostgreSQL, followed by a passing targeted process-level test after adding the replay demonstration. Eight simultaneous replay requests produced one acceptance; stale results and delayed replays were rejected. A provider-success/database-loss case recorded two provider calls and unknown-outcome/succeeded attempt history. The final-attempt crash case recorded failure without a second call. Ruff lint/format and whitespace checks passed. The same two upstream TestClient deprecation warnings remain. Temporary processes, relay sockets, and test schemas were cleaned up. No real provider or public API was contacted.
 
 Compose image building and container startup were not rerun in phase 4; the previous dependency download limitation remains recorded, and phase 5 will complete the remaining runtime verification. No Git commit or push was performed. No additional user technology choices or rejected suggestions were inferred.
+
+## Phase 5 Implementation Record
+
+At the user's request, the AI added a GitHub Actions workflow for locked installation, Ruff, the full PostgreSQL test suite, Compose configuration validation, and isolated Compose verification. It runs on push, pull request, or manual dispatch with read-only permissions and pinned official action commits, and does not deploy. The AI consulted official uv Docker and GitHub Actions documentation for the build-cache and workflow patterns. Python/runtime and dependency versions remain unchanged.
+
+The AI split third-party installation into a separate Docker layer with BuildKit uv cache mounts. Investigation showed that the package index was reachable while wheel downloads were slow on both host and container. A timed host download retrieved only part of the wheel, and diagnostic downloads/builds were stopped. The project-specific existing uv cache was then imported into BuildKit using a temporary helper Dockerfile, preserving the locked package versions. The final application image built successfully, and the subsequent build reused its layers. A complete uncached network download was not successfully repeated.
+
+The new `scripts/verify_compose.py` creates a randomly named project, available localhost ports, and a fresh database volume. Actual verification passed delivery and replay scenarios, stopped-worker backlog processing, SIGKILL recovery with two provider calls and unknown-outcome/succeeded history, PostgreSQL outage/readiness and subsequent processing, and data retention after container recreation. The script removed its own generated resources and did not replace the existing development services. `MOCK_PROVIDER_PORT` was added to make the provider's host port configurable.
+
+Final checks performed: locked uv synchronization, Ruff lint and formatting, 106 passing tests against real PostgreSQL, workflow YAML parsing and required-command checks, Docker image build/cached rebuild, and the full isolated Compose script. Two upstream TestClient deprecation warnings remain. README, DESIGN, and PLAN were reconciled with implemented behavior and the actual verification evidence. The GitHub-hosted workflow itself was not executed because the changes have not been pushed. No Git commit, push, or deployment was performed.

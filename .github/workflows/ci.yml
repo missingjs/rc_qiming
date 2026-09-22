@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_USER: notifications
+          POSTGRES_PASSWORD: notifications
+          POSTGRES_DB: notifications_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U notifications -d notifications_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://notifications:notifications@localhost:5432/notifications_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.5"
+          python-version: "3.14"
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --locked
+      - name: Lint
+        run: uv run --locked ruff check .
+      - name: Check formatting
+        run: uv run --locked ruff format --check .
+      - name: Test with PostgreSQL and local mock providers
+        run: uv run --locked pytest -v
+      - name: Validate Compose configuration
+        run: docker compose -f compose.yaml -f compose.demo.yaml config --quiet
+      - name: Verify isolated Compose delivery and recovery
+        run: uv run --locked python scripts/verify_compose.py

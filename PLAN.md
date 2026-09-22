@@ -2,7 +2,7 @@
 
 ## Current Status and Scope
 
-Phases 1 through 4 are complete: the foundation, durable submission, idempotency, queries, delivery, retries, expired-lease recovery, manual replay, and mock provider are implemented and verified. Phase 5 remains for CI and final Compose verification. See [DESIGN.md](DESIGN.md) for behavior contracts and proposed defaults. This plan covers the minimum reliable delivery workflow, excluding production deployment and provider-specific business adapters.
+All five MVP phases are complete: the service, recovery/replay behavior, tests, CI configuration, and local Compose verification are implemented. The first GitHub-hosted workflow execution is pending a push; all corresponding commands passed locally. See [DESIGN.md](DESIGN.md) for behavior contracts and proposed defaults. This plan covers the minimum reliable delivery workflow, excluding production deployment and provider-specific business adapters.
 
 - [x] Review the original requirements and confirm the technology stack and MVP boundaries.
 - [x] Create the README, collaboration guidelines, implementation plan, design, and AI usage statement.
@@ -51,13 +51,15 @@ Verification: all 106 tests passed against real PostgreSQL. New checks cover eig
 
 ## Phase 5: Delivery and Verification
 
-- [ ] Complete unit tests, real PostgreSQL integration tests, and Compose demonstration checks.
-- [ ] Add GitHub Actions to run Ruff and tests, without automatic deployment.
-- [ ] Complete README examples for startup, submission, querying, replay, and testing.
-- [ ] Reconcile DESIGN with the final implementation and update actual tradeoffs and AI usage records.
+- [x] Complete unit tests, real PostgreSQL integration tests, and Compose demonstration checks.
+- [x] Add GitHub Actions to run Ruff and tests, without automatic deployment.
+- [x] Complete README examples for startup, submission, querying, replay, and testing.
+- [x] Reconcile DESIGN with the final implementation and update actual tradeoffs and AI usage records.
 
 Acceptance: following the README reproduces successful delivery, recovery from temporary failure, retry exhaustion, and manual replay. Tasks remain processable after a worker restart. Required checks pass, and limitations and unimplemented capabilities are disclosed accurately.
 
+Verification: locked dependency synchronization, Ruff lint/format checks, all 106 tests against real PostgreSQL, workflow YAML validation, and full isolated Compose verification passed. Container checks cover migration ordering, six delivery/replay scenarios, backlog after worker restart, SIGKILL recovery with two provider calls and retained unknown-outcome/succeeded history, readiness during PostgreSQL restart, subsequent delivery, and persistence after container recreation. Generated containers, network, and volume were removed; existing development services were preserved. The Dockerfile now caches dependency installation independently of application edits. Slow host/container downloads were bypassed by importing the already populated project uv cache into BuildKit; the final build and cached rebuild passed, but a full uncached download was not successfully repeated. Two upstream TestClient deprecation warnings remain. The GitHub-hosted workflow itself has not run before a push, and no deployment was performed.
+
 ## Execution and Maintenance
 
-Complete phases in order; each depends on the preceding phase. If implementation reveals a design issue, update the relevant DESIGN contract and rationale, then align acceptance criteria. Phases 1 through 4 have passed acceptance. Phase 5 remains unstarted. Local process tests now verify recovery, shutdown, database connection interruptions, and replay; updated Compose runtime verification and CI remain outstanding. Duplicate delivery remains possible when the provider accepts a request but the local result is lost.
+Complete phases in order; each depends on the preceding phase. If implementation reveals a design issue, update the relevant DESIGN contract and rationale, then align acceptance criteria. All five phases have passed local acceptance. CI will repeat the tests and Compose checks on pushes and pull requests. Its first hosted result remains to be observed after pushing the workflow. Duplicate delivery remains possible when the provider accepts a request but the local result is lost; production hardening remains outside the MVP.

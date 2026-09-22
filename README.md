@@ -6,7 +6,7 @@ The project follows an API notification system assignment, emphasizing system bo
 
 ## Current Status
 
-Phases 1 through 4 provide durable submission, concurrent idempotency protection, queries, independent HTTP delivery, bounded retries, attempt records, expired-lease recovery, manual replay, Docker Compose configuration, and a mock provider. Crash, shutdown, and database connection recovery are verified against real PostgreSQL. CI and updated Compose runtime verification remain phase 5 work.
+All five MVP phases are implemented. Durable submission, concurrent idempotency protection, queries, delivery, bounded retries, lease recovery, replay, and attempt history are verified against real PostgreSQL and local mock providers. Compose verification covers delivery, replay, worker crashes/restarts, database restart, and data retention after container recreation. GitHub Actions is configured to run the same checks; its first hosted execution is pending a push.
 
 The stack is Python 3.14, FastAPI, uv, PostgreSQL 17, SQLAlchemy, psycopg, Alembic, and HTTPX. Runtime and development dependencies are locked in `uv.lock`.
 
@@ -25,6 +25,8 @@ docker compose logs migrate worker
 The migration service must finish successfully before the API and worker start. The API is available at `http://localhost:8000`, with OpenAPI documentation at `/docs`. Liveness returns `200` when the API is running. Readiness returns `200` only when the database and expected table columns are available, otherwise `503`. API readiness does not check the worker.
 
 The default PostgreSQL port is `55432` and the API port is `8000`, both bound to localhost. Change `POSTGRES_PORT` or `API_PORT` in `.env` if needed. Compose builds the internal database URL from `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`; the local `DATABASE_URL` is for host processes. If changing the PostgreSQL port, update the local URL too. Example credentials are for local demonstrations only; URL-encode special characters in credentials when constructing a database URL.
+
+The Dockerfile installs locked dependencies in a separate layer with a BuildKit uv cache, then installs the application. Source and README edits reuse the dependency layer. A first build requires network access to the image registries and Python package index; cached builds avoid repeating dependency downloads.
 
 Stop containers without deleting database data:
 
@@ -79,6 +81,22 @@ Adjust credentials and port if you changed the defaults. If the test database al
 
 Tests cover configuration validation, liveness during database failure, missing-schema readiness, migration upgrade/downgrade/re-upgrade, model/migration consistency, scheduling indexes, binary body persistence, and database uniqueness and foreign-key constraints. Submission tests additionally cover validation and redaction, canonical request comparison, persisted body bytes, status queries, eight concurrent matching or conflicting submissions, and rollback on an injected commit failure. Delivery tests cover status classification, backoff/jitter, Retry-After, deadlines, unread response bodies, redirects, cookie isolation, forwarding, concurrent claims, and claim/result transaction failures. A process-level test starts independent API, worker, and mock-provider processes and runs the five-scenario demo script with short timing settings. Recovery tests add real worker signals and kills, natural lease expiry, final-attempt crashes, stale-result rejection, concurrent replay, and selective database connection loss through a local TCP relay. The relay affects only test connections and does not stop the shared database. All database behavior tests use real PostgreSQL; no real provider is contacted.
 
+## Complete Compose Verification
+
+To build the image and verify the full container workflow without using your development database:
+
+```bash
+uv run --locked python scripts/verify_compose.py
+```
+
+This command creates a randomly named Compose project with available localhost ports and a new database volume. It verifies success, temporary failure, permanent failure, retry exhaustion, timeout exhaustion, and replay, then checks persisted backlog after worker restart, duplicate delivery after SIGKILL and lease recovery, API/worker recovery after PostgreSQL restart, and task retention after container recreation. It uses a one-second delivery timeout, six-second leases, and short retry delays. Finally it removes only that generated project's containers, network, and volume. Your normal Compose project and database remain untouched. Use `--no-build` only when `rc-qiming:local` already contains the current code.
+
+## Continuous Integration
+
+[.github/workflows/ci.yml](.github/workflows/ci.yml) runs on pushes, pull requests, and manual dispatch. It installs uv 0.12.5 and Python 3.14, uses a PostgreSQL 17 service, installs locked dependencies, runs Ruff and all tests, validates the Compose overlay, and runs the isolated Compose verification above. Actions are pinned to commit hashes, permissions are read-only, and there is no deployment step.
+
+The final local verification passed 106 tests, Ruff checks, workflow YAML validation, and the complete Compose script. Two upstream TestClient deprecation warnings remain. The GitHub-hosted workflow has not yet run because these changes have not been pushed.
+
 ## Delivery Demonstration
 
 For a local demonstration without rebuilding images, start the API and worker using the local development commands above. Start the mock provider in another terminal:
@@ -103,9 +121,9 @@ docker compose -f compose.yaml -f compose.demo.yaml up --build -d --wait
 uv run --locked python scripts/demo_delivery.py
 ```
 
-Verification status: the overlay configuration was validated, but the latest image build timed out after 120 seconds during dependency downloads. Updated container startup has not been verified. The same demo script passed using independent local API, worker, and provider processes against real PostgreSQL.
+The overlay has passed actual container verification, including migration-before-application startup, all delivery/replay scenarios, recovery, and persistent-volume recreation. Earlier download stalls were resolved for this environment by importing the existing project uv cache into BuildKit; the final build and subsequent cached builds passed. An uncached download of all dependencies was not repeated successfully in this environment.
 
-The default script provider URL is `http://mock-provider:8000`, reachable from the container worker. Host workers must use `--provider-base http://127.0.0.1:8002`. Run a single provider process because its counters are in memory. The overlay publishes the provider on localhost port 8002. Stop the demo containers while retaining database data with `docker compose -f compose.yaml -f compose.demo.yaml down`.
+The default script provider URL is `http://mock-provider:8000`, reachable from the container worker. Host workers must use `--provider-base http://127.0.0.1:8002`. Run a single provider process because its counters are in memory. The overlay publishes the provider on localhost port 8002; change `MOCK_PROVIDER_PORT` if that port is occupied. Stop the demo containers while retaining database data with `docker compose -f compose.yaml -f compose.demo.yaml down`.
 
 Worker logs contain JSON events and sanitized results. The worker does not follow redirects, read provider response bodies, retain provider cookies, or inherit environment HTTP proxies. On SIGINT/SIGTERM, the worker finishes its current attempt before exiting. After a forced stop, another worker recovers the task once its lease expires; a final-attempt crash becomes a failed task with `unknown_outcome`. If a provider accepted the request before a crash or database failure, recovery may deliver it again.
 
@@ -171,7 +189,7 @@ Business system submits request -> PostgreSQL persists task -> Task ID returned
 
 Callers prepare the URL, headers, and body. The service acknowledges acceptance only after persistence, without waiting for the provider response. Duplicate delivery is possible and automatic retries are bounded. HTTP success does not prove provider business success; business deduplication requires cooperation between the caller and provider.
 
-The first version is for a trusted internal demonstration. Authentication, destination allowlists, provider adapters, and an administration UI are out of scope. The mock provider supports delivery demonstrations; replay and process-level recovery demonstrations are available, while Compose runtime verification remains phase 5 work.
+The first version is for a trusted internal demonstration. Authentication, destination allowlists, provider adapters, and an administration UI are out of scope. The mock provider supports delivery demonstrations; replay and process-level recovery demonstrations are available, and isolated Compose runtime verification is available.
 
 ## Documentation
 
