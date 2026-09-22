@@ -8,7 +8,7 @@ Verification: 70 non-integration tests passed, including the new cases; Ruff lin
 
 ## Scope of This Record
 
-This document records actual AI collaboration on the project and will evolve during development. Work completed so far includes requirements discussions, design, project documentation, and all five implementation phases. The service, mock provider, recovery/replay, tests, CI configuration, and local Compose verification are complete. The first GitHub-hosted workflow execution remains pending a push. Reasons offered by the AI are not automatically attributed to the author as personal motivations.
+This document records actual AI collaboration on the project and will evolve during development. Work completed so far includes requirements discussions, design, project documentation, and all five implementation phases. The service, mock provider, recovery/replay, tests, CI configuration, and local Compose verification are complete. The user has confirmed that CI passed on GitHub. Reasons offered by the AI are not automatically attributed to the author as personal motivations.
 
 ## AI Contributions
 
@@ -104,4 +104,8 @@ The AI split third-party installation into a separate Docker layer with BuildKit
 
 The new `scripts/verify_compose.py` creates a randomly named project, available localhost ports, and a fresh database volume. Actual verification passed delivery and replay scenarios, stopped-worker backlog processing, SIGKILL recovery with two provider calls and unknown-outcome/succeeded history, PostgreSQL outage/readiness and subsequent processing, and data retention after container recreation. The script removed its own generated resources and did not replace the existing development services. `MOCK_PROVIDER_PORT` was added to make the provider's host port configurable.
 
-Final checks performed: locked uv synchronization, Ruff lint and formatting, 106 passing tests against real PostgreSQL, workflow YAML parsing and required-command checks, Docker image build/cached rebuild, and the full isolated Compose script. Two upstream TestClient deprecation warnings remain. README, DESIGN, and PLAN were reconciled with implemented behavior and the actual verification evidence. The GitHub-hosted workflow itself was not executed because the changes have not been pushed. No Git commit, push, or deployment was performed.
+Final checks performed: locked uv synchronization, Ruff lint and formatting, 106 passing tests against real PostgreSQL, workflow YAML parsing and required-command checks, Docker image build/cached rebuild, and the full isolated Compose script. Two upstream TestClient deprecation warnings remain. README, DESIGN, and PLAN were reconciled with implemented behavior and the actual verification evidence. At the time of this phase 5 record, the GitHub-hosted workflow had not been executed because the changes had not been pushed. No Git commit, push, or deployment was performed.
+
+## User-Confirmed GitHub CI Result
+
+The user checked GitHub and confirmed that CI passed, then requested a documentation status update. The AI updated the current status in README, DESIGN, PLAN, and this statement while preserving historical local verification records. The AI did not independently inspect the hosted run logs or test count, rerun tests, or perform a deployment for this documentation update.

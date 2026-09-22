@@ -6,7 +6,7 @@ The project follows an API notification system assignment, emphasizing system bo
 
 ## Current Status
 
-All five MVP phases are implemented. Durable submission, concurrent idempotency protection, queries, delivery, bounded retries, lease recovery, replay, and attempt history are verified against real PostgreSQL and local mock providers. Compose verification covers delivery, replay, worker crashes/restarts, database restart, and data retention after container recreation. GitHub Actions is configured to run the same checks; its first hosted execution is pending a push.
+All five MVP phases are implemented. Durable submission, concurrent idempotency protection, queries, delivery, bounded retries, lease recovery, replay, and attempt history are verified against real PostgreSQL and local mock providers. Compose verification covers delivery, replay, worker crashes/restarts, database restart, and data retention after container recreation. GitHub Actions is configured to run the same checks, and the user has confirmed that CI passed on GitHub.
 
 The stack is Python 3.14, FastAPI, uv, PostgreSQL 17, SQLAlchemy, psycopg, Alembic, and HTTPX. Runtime and development dependencies are locked in `uv.lock`.
 
@@ -95,7 +95,7 @@ This command creates a randomly named Compose project with available localhost p
 
 [.github/workflows/ci.yml](.github/workflows/ci.yml) runs on pushes, pull requests, and manual dispatch. It installs uv 0.12.5 and Python 3.14, uses a PostgreSQL 17 service, installs locked dependencies, runs Ruff and all tests, validates the Compose overlay, and runs the isolated Compose verification above. Actions are pinned to commit hashes, permissions are read-only, and there is no deployment step.
 
-The final local verification passed 106 tests, Ruff checks, workflow YAML validation, and the complete Compose script. Two upstream TestClient deprecation warnings remain. The GitHub-hosted workflow has not yet run because these changes have not been pushed.
+The phase 5 local verification passed 106 tests, Ruff checks, workflow YAML validation, and the complete Compose script. The subsequent header validation fix passed 70 non-integration tests locally; its 43 database integration cases and Compose checks were not rerun locally. Two upstream TestClient deprecation warnings were observed in that run. The user has since confirmed that CI passed on GitHub. The hosted result is user-confirmed; its logs and test count were not independently inspected during this documentation update.
 
 ## Delivery Demonstration
 
